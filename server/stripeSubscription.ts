@@ -1,12 +1,8 @@
 import Stripe from "stripe";
+import { resolveStripeSecretKey, isStripeApiConfigured } from "./stripeConfig";
 import { storage } from "./storage";
 
-const stripeSecretKey = process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
-if (!stripeSecretKey) {
-  throw new Error("Missing required Stripe secret: STRIPE_SECRET_KEY");
-}
-
-const stripe = new Stripe(stripeSecretKey, {
+const stripe = new Stripe(resolveStripeSecretKey(), {
   apiVersion: "2024-12-18.acacia" as any,
 });
 
@@ -21,6 +17,13 @@ interface SubscriptionTier {
 
 export class StripeSubscriptionService {
   async createOrUpdateProductsAndPrices(): Promise<void> {
+    if (!isStripeApiConfigured()) {
+      console.warn(
+        "[StripeSubscription] Skipping createOrUpdateProductsAndPrices — STRIPE_SECRET_KEY not set.",
+      );
+      return;
+    }
+
     const plans = await storage.listSubscriptionPlans(true);
 
     for (const plan of plans) {
@@ -164,6 +167,13 @@ export class StripeSubscriptionService {
   }
 
   async createCountryPrices(countryCode: string, tierCode: string): Promise<void> {
+    if (!isStripeApiConfigured()) {
+      console.warn(
+        `[StripeSubscription] Skipping createCountryPrices(${countryCode}, ${tierCode}) — STRIPE_SECRET_KEY not set.`,
+      );
+      return;
+    }
+
     const countryPricing = await storage.getCountryPricingByCountryAndTier(countryCode, tierCode);
     if (!countryPricing) {
       throw new Error(`Country pricing not found for ${countryCode} - ${tierCode}`);
@@ -230,6 +240,9 @@ export class StripeSubscriptionService {
     priceId: string,
     metadata?: Record<string, string>
   ): Promise<Stripe.Subscription> {
+    if (!isStripeApiConfigured()) {
+      throw new Error("Stripe subscription API is disabled: set STRIPE_SECRET_KEY.");
+    }
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
@@ -243,6 +256,9 @@ export class StripeSubscriptionService {
   }
 
   async getOrCreateCustomer(email: string, orgId: string, orgName: string): Promise<Stripe.Customer> {
+    if (!isStripeApiConfigured()) {
+      throw new Error("Stripe customer API is disabled: set STRIPE_SECRET_KEY.");
+    }
     const org = await storage.getOrganization(orgId);
     if (org?.stripeCustomerId) {
       try {
@@ -271,6 +287,9 @@ export class StripeSubscriptionService {
   }
 
   async updateSubscription(subscriptionId: string, priceId: string): Promise<Stripe.Subscription> {
+    if (!isStripeApiConfigured()) {
+      throw new Error("Stripe subscription API is disabled: set STRIPE_SECRET_KEY.");
+    }
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     const currentItem = subscription.items.data[0];
 
@@ -288,6 +307,9 @@ export class StripeSubscriptionService {
   }
 
   async cancelSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
+    if (!isStripeApiConfigured()) {
+      throw new Error("Stripe subscription API is disabled: set STRIPE_SECRET_KEY.");
+    }
     return await stripe.subscriptions.cancel(subscriptionId);
   }
 

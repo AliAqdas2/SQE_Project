@@ -102,6 +102,7 @@ import {
 import { eq, and, or, gte, lte, asc, desc, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import Stripe from "stripe";
+import { resolveStripeSecretKey } from "./stripeConfig";
 import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "crypto";
 import { sendApprovalEmail, sendRejectionEmail, sendNewRegistrationNotification, sendTeamAdminInvitation } from "./email";
@@ -112,15 +113,24 @@ import { seedDefaultEmailTemplate } from "./seed-default-email-templates";
 import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectAclPolicy, ObjectPermission } from "./objectAcl";
 import { seedSubscriptionData } from "./seed-subscriptions";
-import { openai } from "./openai";
-import { buildOrgChatContext } from "./ai/contextBuilder";
+import {
+  STUB_PNG_B64,
+  defaultCampaignAiPayload,
+  defaultGoalSuggestions,
+  defaultRegeneratedStory,
+  defaultCampaignChatReply,
+  defaultFundraisingStrategyJson,
+  defaultEventAiStructuredText,
+  defaultEventDescription,
+  defaultPrayerModeration,
+  defaultPublicChatReply,
+} from "./openai";
 import multer from "multer";
 import { stripeSubscriptionService } from "./stripeSubscription";
 import { memberCountService } from "./memberCount";
 import * as analytics from "./analytics";
 
-const stripeSecretKey = process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
-const stripe = new Stripe(stripeSecretKey!, {
+const stripe = new Stripe(resolveStripeSecretKey(), {
   apiVersion: "2024-12-18.acacia" as any,
 });
 
@@ -1871,72 +1881,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Stage 1: Generating text content (0-40%)
       sendProgress(res, 10, "Analyzing your campaign details...");
       
-      // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-      sendProgress(res, 20, "Generating compelling content...");
-      
-      const completion = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
-          {
-            role: "system",
-            content: `You are a fundraising campaign expert helping faith-based organizations create compelling campaigns. Generate engaging, empathetic, and inspiring campaign content that resonates with donors.`
-          },
-          {
-            role: "user",
-            content: `Create a comprehensive fundraising campaign based on:
-Title: ${title}
-Brief Description: ${briefDescription}
-Country: ${country}
-Target Amount: ${target}
+      sendProgress(res, 20, "Generating compelling content (placeholder)...");
 
-Generate:
-1. A full, compelling description (3-4 paragraphs) that tells a story and motivates donors
-2. Three suggested quick donation amounts with short descriptions for each (e.g., "£25 - Provides meals for one family")
-3. A suggested banner image description that would be appropriate for this campaign
+      const generatedContent = defaultCampaignAiPayload(title, briefDescription, String(target));
 
-Respond in JSON format with this structure:
-{
-  "description": "full campaign description",
-  "quickDonations": [
-    { "amount": number, "description": "what this amount provides" },
-    { "amount": number, "description": "what this amount provides" },
-    { "amount": number, "description": "what this amount provides" }
-  ],
-  "bannerPrompt": "description for AI image generation"
-}`
-          }
-        ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 8192
-      });
+      sendProgress(res, 40, "Text content ready!");
 
-      sendProgress(res, 40, "Text content generated successfully!");
-
-      let generatedContent;
-      try {
-        generatedContent = JSON.parse(completion.choices[0].message.content || "{}");
-      } catch (parseError) {
-        console.error("Failed to parse AI response:", parseError);
-        res.write(`data: ${JSON.stringify({ error: "Failed to parse AI-generated content" })}\n\n`);
-        res.end();
-        return;
-      }
-
-      // Stage 2: Generating banner image (40-70%)
       sendProgress(res, 50, "Creating donation tiers and banner...");
-      sendProgress(res, 60, "Generating banner image...");
+      sendProgress(res, 60, "Using placeholder banner...");
 
-      // Generate banner image using AI
-      const imageResponse = await openai.images.generate({
-        model: "gpt-image-1",
-        prompt: `Professional, inspiring banner image for a fundraising campaign: ${generatedContent.bannerPrompt || title}. Faith-based, hopeful, community-oriented, high quality, warm lighting.`,
-        n: 1,
-        size: "1536x1024"
-      });
+      const bannerImage = STUB_PNG_B64;
 
-      sendProgress(res, 70, "Banner image created!");
-
-      const bannerImage = imageResponse.data[0].b64_json;
+      sendProgress(res, 70, "Banner placeholder ready!");
 
       // Stage 3: Finalizing (70-100%)
       sendProgress(res, 80, "Finalizing your campaign...");
@@ -1981,78 +1937,7 @@ Respond in JSON format with this structure:
         return res.status(403).json({ error: "User must be associated with an organization" });
       }
 
-      // Fetch some sample campaigns for context (limit to 10 for performance)
-      const sampleCampaigns = await db.select({
-        title: campaigns.title,
-        goalAmount: campaigns.goalAmount,
-        currentAmount: campaigns.currentAmount,
-        category: campaigns.category,
-        country: campaigns.country,
-      })
-        .from(campaigns)
-        .limit(10);
-
-      const campaignContext = sampleCampaigns.map(c => 
-        `${c.title}: Target ${c.goalAmount}, Raised ${c.currentAmount || 0} (${c.country})`
-      ).join('\n');
-
-      const completion = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
-          {
-            role: "system",
-            content: `You are a fundraising analytics expert helping faith-based organizations set realistic and achievable campaign goals. Analyze campaign details and historical data to suggest optimal fundraising targets.`
-          },
-          {
-            role: "user",
-            content: `Analyze this fundraising campaign and suggest three goal tiers:
-
-Campaign Details:
-- Title: ${title}
-- Description: ${description || "No description provided"}
-- Country: ${country}
-- Category: ${category || "General"}
-- Organization Type: ${organizationType || "Faith-based"}
-
-Sample Historical Campaigns:
-${campaignContext || "No historical data available"}
-
-Based on this information, suggest three fundraising goal tiers with reasoning:
-1. Conservative Goal: A safe, achievable target based on typical success rates
-2. Moderate Goal: A balanced target that's challenging but realistic
-3. Ambitious Goal: A stretch target that represents high success
-
-Respond in JSON format with this structure:
-{
-  "conservative": {
-    "amount": number,
-    "reasoning": "Brief explanation (1-2 sentences)"
-  },
-  "moderate": {
-    "amount": number,
-    "reasoning": "Brief explanation (1-2 sentences)"
-  },
-  "ambitious": {
-    "amount": number,
-    "reasoning": "Brief explanation (1-2 sentences)"
-  },
-  "insights": "Overall insights about goal setting for this campaign (2-3 sentences)"
-}`
-          }
-        ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 8192
-      });
-
-      let suggestions;
-      try {
-        suggestions = JSON.parse(completion.choices[0].message.content || "{}");
-      } catch (parseError) {
-        console.error("Failed to parse AI response:", parseError);
-        return res.status(500).json({ error: "Failed to parse AI suggestions" });
-      }
-
-      res.json(suggestions);
+      res.json(defaultGoalSuggestions());
     } catch (error: any) {
       console.error("Goal optimization error:", error);
       res.status(500).json({ error: "Failed to optimize goal", details: error.message });
@@ -2075,45 +1960,10 @@ Respond in JSON format with this structure:
         return res.status(403).json({ error: "Unauthorized" });
       }
 
-      const stylePrompts = {
-        emotional: "Write an emotionally compelling narrative that tugs at heartstrings and inspires empathy. Use vivid storytelling and personal touches.",
-        factual: "Write a clear, factual narrative focused on data, impact metrics, and concrete outcomes. Use specific numbers and evidence.",
-        testimonial: "Write from the perspective of those being helped. Include stories, voices, and personal experiences of beneficiaries.",
-        urgent: "Write with a sense of urgency and immediate need. Emphasize the critical timing and pressing nature of the cause.",
-        inspirational: "Write an uplifting narrative that focuses on hope, transformation, and positive change. Celebrate victories and possibilities."
-      };
-
-      const selectedStyle = stylePrompts[style as keyof typeof stylePrompts] || stylePrompts.emotional;
-
-      const completion = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
-          {
-            role: "system",
-            content: `You are a fundraising campaign expert helping faith-based organizations create compelling campaigns. ${selectedStyle}`
-          },
-          {
-            role: "user",
-            content: `Regenerate a compelling campaign description for this fundraising campaign:
-
-Title: ${campaign.title}
-Current Description: ${campaign.description || "No description yet"}
-Target Amount: ${campaign.goalAmount}
-${additionalContext ? `Additional Context: ${additionalContext}` : ''}
-
-Create a new, engaging description (3-4 paragraphs) that:
-- Matches the ${style} narrative style
-- Tells a clear story that motivates donors
-- Highlights the impact of donations
-- Is authentic and compelling
-
-Respond with only the new description text, no JSON wrapper.`
-          }
-        ],
-        max_completion_tokens: 8192
-      });
-
-      const newDescription = completion.choices[0].message.content || "";
+      const newDescription = defaultRegeneratedStory(
+        campaign.title,
+        typeof style === "string" ? style : "general"
+      );
 
       res.type("text/plain").send(newDescription);
     } catch (error: any) {
@@ -2392,13 +2242,6 @@ Respond with only the new description text, no JSON wrapper.`
         return res.status(404).json({ error: "Campaign not found" });
       }
 
-      // Get recent chat history
-      const history = await db.select()
-        .from(campaignChatMessages)
-        .where(eq(campaignChatMessages.campaignId, req.params.campaignId))
-        .orderBy(campaignChatMessages.createdAt)
-        .limit(10);
-
       // Save user message
       await db.insert(campaignChatMessages).values({
         campaignId: req.params.campaignId,
@@ -2406,41 +2249,7 @@ Respond with only the new description text, no JSON wrapper.`
         content: message,
       });
 
-      // Calculate progress percentage
-      const currentAmount = parseFloat(campaign.currentAmount) || 0;
-      const goalAmount = parseFloat(campaign.goalAmount) || 1;
-      const progressPercentage = (currentAmount / goalAmount) * 100;
-
-      // Get AI response
-      const completion = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert fundraising strategist and campaign manager helping faith-based organizations optimize their campaigns. You provide actionable, specific advice on promotion strategies, donor engagement, and campaign optimization.
-            
-Campaign Context:
-- Title: ${campaign.title}
-- Description: ${campaign.description?.substring(0, 200)}
-- Goal: ${campaign.goalAmount}
-- Current Amount: ${campaign.currentAmount}
-- Progress: ${progressPercentage.toFixed(1)}%
-- Category: ${campaign.category || "General"}
-- Country: ${campaign.country || "Not specified"}
-- Status: ${campaign.status}
-
-Focus on: social media strategies, email marketing, community outreach, donor stewardship, timing optimization, and platform-specific tactics. Be specific and actionable.`
-          },
-          ...history.map(h => ({ role: h.role as "user" | "assistant", content: h.content })),
-          {
-            role: "user",
-            content: message
-          }
-        ],
-        max_completion_tokens: 2048
-      });
-
-      const aiResponse = completion.choices[0].message.content || "I'm sorry, I couldn't generate a response.";
+      const aiResponse = defaultCampaignChatReply();
 
       // Save AI response
       const [savedMessage] = await db.insert(campaignChatMessages).values({
@@ -2541,87 +2350,7 @@ Focus on: social media strategies, email marketing, community outreach, donor st
         return acc;
       }, {});
       
-      // Build structured prompt for AI
-      const systemPrompt = `You are an expert fundraising strategist specializing in faith-based organizations. Generate a comprehensive marketing strategy for this campaign.
-
-CAMPAIGN DETAILS:
-- Title: ${campaign.title}
-- Category: ${campaign.category || 'General'}
-- Location: ${campaign.country || organization.country || 'Not specified'}, ${organization.city || 'Unknown city'}
-- Goal: ${campaign.goalAmount} ${campaign.currency}
-- Current Amount: ${campaign.currentAmount} ${campaign.currency}
-- Status: ${campaign.status}
-- Description: ${campaign.description?.substring(0, 300)}
-
-ORGANIZATION CONTEXT:
-- Name: ${organization.name}
-- Religion: ${organization.religion || 'Multi-faith'}
-- City: ${organization.city || 'Unknown'}
-- Country: ${organization.country || 'Unknown'}
-
-DONOR DATABASE INSIGHTS:
-- Total Donors in Database: ${totalDonors}
-- Campaign Donors: ${campaignDonorCount}
-- Average Donation: ${avgDonation.toFixed(2)} ${campaign.currency}
-- Donor Tiers: ${JSON.stringify(donorsByTier)}
-- Top Donor Tags: ${JSON.stringify(Object.entries(topTags).slice(0, 5))}
-- Recent Donations (30 days): ${recentDonations.length}
-
-Generate a comprehensive strategy with these EXACT 5 sections. Each section should be 3-5 bullet points of actionable advice:
-
-1. **Donor Outreach Strategy**
-   - How to engage existing donors
-   - Strategies for donor acquisition
-   - Personalization tactics based on donor segments
-
-2. **Social Media Strategy**
-   - Platform-specific tactics (Facebook, Instagram, Twitter/X, LinkedIn)
-   - Content themes and posting frequency
-   - Hashtag and community engagement strategies
-
-3. **Messaging & Communication**
-   - Key messages that resonate with ${organization.religion || 'multi-faith'} audiences
-   - Emotional appeals and storytelling angles
-   - Email and SMS communication tactics
-
-4. **Event Ideas**
-   - Fundraising events to organize
-   - Community engagement activities
-   - Virtual and in-person event concepts
-
-5. **Online Communities to Target**
-   - Specific Facebook groups, forums, or online communities
-   - Relevant hashtags and social media trends
-   - Partnership opportunities with similar organizations
-
-Format your response as JSON with this structure:
-{
-  "donorOutreach": ["point 1", "point 2", "point 3"],
-  "socialMedia": ["point 1", "point 2", "point 3"],
-  "messaging": ["point 1", "point 2", "point 3"],
-  "events": ["point 1", "point 2", "point 3"],
-  "onlineCommunities": ["point 1", "point 2", "point 3"]
-}`;
-
-      // Call OpenAI
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          },
-          {
-            role: "user",
-            content: "Generate the comprehensive fundraising strategy for this campaign."
-          }
-        ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 2048
-      });
-
-      const aiResponse = completion.choices[0].message.content || "{}";
-      const strategyContent = JSON.parse(aiResponse);
+      const strategyContent = defaultFundraisingStrategyJson();
       
       // Create summary
       const summary = `AI-generated fundraising strategy for ${campaign.title}. Analyzed ${totalDonors} donors, ${campaignDonorCount} campaign donors, and ${recentDonations.length} recent donations to provide targeted recommendations.`;
@@ -2776,82 +2505,7 @@ Format your response as JSON with this structure:
         // Top donor tags (placeholder - tags would need to be fetched from donor_tags table if needed)
         const topTags: [string, number][] = [];
 
-        // Generate strategy using same prompt as strategy endpoint
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "system",
-              content: `You are an expert fundraising strategist specializing in faith-based organizations. Generate a comprehensive marketing strategy for this campaign.
-
-CAMPAIGN DETAILS:
-- Title: ${campaign.title}
-- Category: ${campaign.category || 'General'}
-- Location: ${campaign.country || organization.country || 'Not specified'}, ${organization.city || 'Unknown city'}
-- Goal: ${campaign.goalAmount} ${campaign.currency}
-- Current Amount: ${campaign.currentAmount} ${campaign.currency}
-- Status: ${campaign.status}
-- Description: ${campaign.description?.substring(0, 300)}
-
-ORGANIZATION CONTEXT:
-- Name: ${organization.name}
-- Religion: ${organization.religion || 'Multi-faith'}
-- City: ${organization.city || 'Unknown'}
-- Country: ${organization.country || 'Unknown'}
-
-DONOR DATABASE INSIGHTS:
-- Total Donors in Database: ${totalDonors}
-- Campaign Donors: ${campaignDonorCount}
-- Average Donation: ${avgDonation.toFixed(2)} ${campaign.currency}
-- Recent Donations (30 days): ${recentDonations.length}
-
-Generate a comprehensive strategy with these EXACT 5 sections. Each section should be 3-5 bullet points of actionable advice:
-
-1. **Donor Outreach Strategy**
-   - How to engage existing donors
-   - Strategies for donor acquisition
-   - Personalization tactics based on donor segments
-
-2. **Social Media Strategy**
-   - Platform-specific tactics (Facebook, Instagram, Twitter/X, LinkedIn)
-   - Content themes and posting frequency
-   - Hashtag and community engagement strategies
-
-3. **Messaging & Communication**
-   - Key messages that resonate with ${organization.religion || 'multi-faith'} audiences
-   - Emotional appeals and storytelling angles
-   - Email and SMS communication tactics
-
-4. **Event Ideas**
-   - Fundraising events to organize
-   - Community engagement activities
-   - Virtual and in-person event concepts
-
-5. **Online Communities**
-   - How to leverage online platforms and forums
-   - Building and engaging digital communities
-   - Partnering with influencers and community leaders
-
-Return ONLY a valid JSON object with this exact structure:
-{
-  "donorOutreach": ["point 1", "point 2", "point 3"],
-  "socialMedia": ["point 1", "point 2", "point 3"],
-  "messaging": ["point 1", "point 2", "point 3"],
-  "eventIdeas": ["point 1", "point 2", "point 3"],
-  "onlineCommunities": ["point 1", "point 2", "point 3"]
-}`
-            },
-            {
-              role: "user",
-              content: "Generate the comprehensive fundraising strategy for this campaign."
-            }
-          ],
-          response_format: { type: "json_object" },
-          max_completion_tokens: 2048
-        });
-
-        const aiResponse = completion.choices[0].message.content || "{}";
-        const strategyContent = JSON.parse(aiResponse);
+        const strategyContent = defaultFundraisingStrategyJson();
 
         // Save the generated strategy
         const summary = `AI-generated fundraising strategy for ${campaign.title}. Analyzed ${totalDonors} donors, ${campaignDonorCount} campaign donors, and ${recentDonations.length} recent donations to provide targeted recommendations.`;
@@ -4497,34 +4151,12 @@ ${org?.name || 'Our Team'}
 
       console.log("Generating event content for keywords:", keywords);
 
-      // Step 1: Generate title and description using ChatGPT
-      // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-      const chatResponse = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert event planner for faith-based organizations. Generate professional, engaging event content."
-          },
-          {
-            role: "user",
-            content: `Create an event based on these keywords: "${keywords}". Make it inspiring, welcoming, and appropriate for a faith-based community.
-
-Return your response in this exact format:
-TITLE: [event title here]
-DESCRIPTION: [2-3 paragraph description]
-IMAGE_CONCEPT: [visual description for banner image]`
-          }
-        ],
-        max_completion_tokens: 2000
-      });
-
-      const responseText = chatResponse.choices[0].message.content || "";
+      const responseText = defaultEventAiStructuredText(keywords);
       
       // Parse the structured response
-      const titleMatch = responseText.match(/TITLE:\s*(.+?)(?=\nDESCRIPTION:)/s);
-      const descMatch = responseText.match(/DESCRIPTION:\s*(.+?)(?=\nIMAGE_CONCEPT:)/s);
-      const imageMatch = responseText.match(/IMAGE_CONCEPT:\s*(.+)/s);
+      const titleMatch = responseText.match(/TITLE:\s*([\s\S]+?)(?=\nDESCRIPTION:)/);
+      const descMatch = responseText.match(/DESCRIPTION:\s*([\s\S]+?)(?=\nIMAGE_CONCEPT:)/);
+      const imageMatch = responseText.match(/IMAGE_CONCEPT:\s*([\s\S]+)/);
 
       const generatedContent = {
         title: titleMatch?.[1]?.trim() || keywords,
@@ -4533,21 +4165,11 @@ IMAGE_CONCEPT: [visual description for banner image]`
       };
       console.log("Generated content:", generatedContent);
 
-      // Step 2: Generate banner image using DALL-E
       let publicUrl: string;
       try {
-        const imageResponse = await openai.images.generate({
-          model: "gpt-image-1",
-          prompt: `Professional, uplifting banner image for a faith-based event: ${generatedContent.imageConcept || keywords}. Warm, welcoming, community-oriented, high quality, bright natural lighting, 16:9 aspect ratio`,
-          n: 1,
-          size: "1536x1024"
-        });
-
-        if (!imageResponse.data || imageResponse.data.length === 0) {
-          throw new Error("No image data returned from OpenAI");
-        }
-
-        // OpenAI can return either URL or base64 depending on response_format
+        const imageResponse: { data: Array<{ b64_json?: string; url?: string }> } = {
+          data: [{ b64_json: STUB_PNG_B64 }],
+        };
         const imageData = imageResponse.data[0];
 
         if (imageData.b64_json) {
@@ -4596,7 +4218,7 @@ IMAGE_CONCEPT: [visual description for banner image]`
           // Note: In production, you should download and re-upload to your storage
           publicUrl = imageData.url;
         } else {
-          throw new Error("No image URL or base64 data in OpenAI response");
+          throw new Error("No image data in placeholder response");
         }
       } catch (imageError: any) {
         console.error("Image generation/upload error:", imageError);
@@ -5079,46 +4701,18 @@ IMAGE_CONCEPT: [visual description for banner image]`
   // AI Event Description Generator
   app.post("/api/events/generate-description", requireAuth, async (req: any, res) => {
     try {
-      const { title, eventType, location, date, tone = "inspirational" } = req.body;
+      const { title, eventType, location, date } = req.body;
 
       if (!title) {
         return res.status(400).json({ error: "Event title is required" });
       }
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert event marketing copywriter specializing in faith-based organization events. Generate compelling event descriptions that inspire attendance and engagement.
-
-The tone should be ${tone}. Write in a way that:
-- Captures the essence and purpose of the event
-- Highlights what attendees will experience or gain
-- Creates excitement and urgency
-- Is concise yet impactful (2-3 paragraphs max)
-- Uses inclusive, welcoming language
-- Ends with a clear call to action
-
-Return ONLY the event description text, no additional commentary.`
-          },
-          {
-            role: "user",
-            content: `Generate an event description with these details:
-
-Title: ${title}
-Type: ${eventType || "in-person"}
-Location: ${location || "TBD"}
-Date: ${date ? new Date(date).toLocaleDateString() : "TBD"}
-Tone: ${tone}
-
-Write a compelling description that will attract attendees.`
-          }
-        ],
-        max_completion_tokens: 512
-      });
-
-      const description = completion.choices[0].message.content || "";
+      const description = defaultEventDescription(
+        title,
+        eventType || "in-person",
+        location || "TBD",
+        date ? new Date(date).toLocaleDateString() : "TBD"
+      );
       res.type("text/plain").send(description);
     } catch (error: any) {
       console.error("AI description generation error:", error);
@@ -9746,48 +9340,8 @@ Write a compelling description that will attract attendees.`
 
   // Prayer Wall / Prayer Requests Routes
 
-  // Helper function for AI moderation
-  async function moderatePrayerRequest(requestText: string, orgId: string) {
-    try {
-      const org = await storage.getOrganization(orgId);
-      
-      const prompt = `You are a content moderator for a faith-based organization's prayer wall. Analyze this prayer request for:
-1. Inappropriate content (profanity, hate speech, spam, solicitation)
-2. Suggested category (health, family, financial, spiritual, guidance, thanksgiving, other)
-3. Sentiment (positive, neutral, concerned)
-
-Prayer request: "${requestText}"
-
-Organization religion: ${org?.religion || 'General'}
-
-Respond in JSON format:
-{
-  "isAppropriate": true/false,
-  "flagReason": "reason if flagged, null otherwise",
-  "suggestedCategory": "category",
-  "sentiment": "sentiment",
-  "moderationNotes": "brief notes for admin"
-}`;
-
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-        temperature: 0.3,
-      });
-
-      const result = JSON.parse(completion.choices[0].message.content || "{}");
-      return result;
-    } catch (error) {
-      console.error("AI moderation error:", error);
-      return {
-        isAppropriate: true,
-        flagReason: null,
-        suggestedCategory: "other",
-        sentiment: "neutral",
-        moderationNotes: "AI moderation unavailable",
-      };
-    }
+  async function moderatePrayerRequest(_requestText: string, _orgId: string) {
+    return defaultPrayerModeration();
   }
 
   // Public: Get approved prayer requests for an organization
@@ -12041,63 +11595,7 @@ Respond in JSON format:
         });
       }
 
-      // Build comprehensive organization context using modular context builder
-      const orgContext = await buildOrgChatContext(org.id);
-      console.log("🤖 AI Chat - Organization Context Length:", orgContext.length);
-      console.log("🤖 AI Chat - Context Preview:", orgContext.substring(0, 200));
-
-      // Build system prompt with enhanced context
-      const systemPrompt = `You are a helpful AI assistant for ${org.name}, a ${org.religion || 'faith-based'} organization. 
-
-Your role is to help members and visitors with questions about:
-- Donations and giving (recurring gifts, impact, donation tips)
-- Active campaigns and fundraising progress
-- Upcoming events and registration
-- Classes and activities
-- Volunteer opportunities
-- Beneficiary support and community impact
-- Livestream schedules
-- Sermons and spiritual content
-- General information about the organization
-
-Organization Profile:
-- Name: ${org.name}
-- Location: ${org.city ? `${org.city}, ${org.state || ''} ${org.country || ''}` : 'Not specified'}
-- Contact: ${org.email}${org.phone ? `\n- Phone: ${org.phone}` : ''}
-
-${orgContext}
-
-Donation Tips:
-- Emphasize the impact of recurring donations (monthly giving provides predictable support)
-- Mention that covering fees ensures 100% of the donation reaches the organization
-- For campaign-specific questions, highlight days remaining and progress percentage to create urgency
-- Reference upcoming events and opportunities to get involved
-
-Guidelines:
-- Be warm, welcoming, and compassionate
-- Provide specific information from the context above when available
-- Keep responses concise but informative (aim for under 150 words)
-- Encourage engagement and participation in campaigns, events, and volunteering
-- For questions beyond the information provided, direct them to contact the organization at ${org.email}
-- Respect the faith tradition and values of the organization
-
-Answer the user's question helpfully and naturally using the information provided above.`;
-
-      // Prepare messages for OpenAI
-      const messages = [
-        { role: "system", content: systemPrompt },
-        ...(conversationHistory || []),
-        { role: "user", content: message }
-      ];
-
-      // Call OpenAI API - the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-      const completion = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: messages as any,
-        max_completion_tokens: 800,
-      });
-
-      const assistantMessage = completion.choices[0].message.content;
+      const assistantMessage = defaultPublicChatReply(org.name, org.email || "");
 
       res.json({
         message: assistantMessage,

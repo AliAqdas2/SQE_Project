@@ -51,6 +51,41 @@ export async function ensureDefaultPlatformAdmin() {
   }
 }
 
+/** Dashboard login for Hope Community org (slug: hope-community). Distinct from eco_admin. */
+const HOPE_ORG_ADMIN_EMAIL = "admin+hope@plegit.demo";
+const HOPE_ORG_ADMIN_PASSWORD = "HopeDemo2026!";
+
+export async function ensureHopeCommunityOrgAdmin(orgId: string) {
+  try {
+    const hash = await bcrypt.hash(HOPE_ORG_ADMIN_PASSWORD, 10);
+    const existing = await storage.getUserByEmail(HOPE_ORG_ADMIN_EMAIL);
+    if (existing) {
+      if (existing.orgId !== orgId || existing.role !== "org_admin" || !existing.passwordHash) {
+        await storage.updateUser(existing.id, {
+          orgId,
+          role: "org_admin",
+          passwordHash: hash,
+        });
+        console.log(`✅ Updated Hope org admin login: ${HOPE_ORG_ADMIN_EMAIL}`);
+      }
+      return;
+    }
+    await storage.createUser({
+      email: HOPE_ORG_ADMIN_EMAIL,
+      firstName: "Hope",
+      lastName: "Admin",
+      passwordHash: hash,
+      role: "org_admin",
+      orgId,
+      emailOptedOut: false,
+    });
+    console.log(`✅ Created Hope Community org admin: ${HOPE_ORG_ADMIN_EMAIL}`);
+  } catch (error) {
+    console.error("❌ Failed to ensure Hope org admin user:", error);
+    throw error;
+  }
+}
+
 export async function seedData() {
   console.log("Seeding initial data...");
 
@@ -65,12 +100,20 @@ export async function seedData() {
       email: "contact@hopecommunitychurch.org",
       phone: "+1 (555) 123-4567",
       primaryColor: "#00BCD4",
+      status: "approved",
       settings: {},
     });
     console.log("Created organization:", demoOrg.name);
   } else {
     console.log("Organization already exists:", demoOrg.name);
+    if (demoOrg.status !== "approved") {
+      const updated = await storage.updateOrganization(demoOrg.id, { status: "approved" });
+      if (updated) demoOrg = updated;
+      console.log("Set Hope Community org status to approved for local testing");
+    }
   }
+
+  await ensureHopeCommunityOrgAdmin(demoOrg.id);
 
   // Check if campaigns already exist
   const existingCampaigns = await storage.listCampaigns(demoOrg.id);
