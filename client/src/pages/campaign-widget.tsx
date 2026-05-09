@@ -90,8 +90,8 @@ export default function CampaignWidgetPage() {
   const totalAmount = coverFees 
     ? (currentAmount + 0.30) / (1 - 0.029)
     : currentAmount;
-  const stripeFee = totalAmount * 0.029 + 0.30;
-  const netAmount = totalAmount - stripeFee;
+  const contributionFeeEstimate = totalAmount * 0.029 + 0.3;
+  const netAmount = totalAmount - contributionFeeEstimate;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -274,7 +274,7 @@ export default function CampaignWidgetPage() {
                       </TooltipProvider>
                     </Label>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      +{formatCurrency(stripeFee)}
+                      +{formatCurrency(contributionFeeEstimate)}
                     </p>
                   </div>
                 </div>

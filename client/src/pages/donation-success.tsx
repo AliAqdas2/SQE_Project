@@ -13,8 +13,15 @@ export default function DonationSuccessPage() {
   useEffect(() => {
     const confirmDonation = async () => {
       try {
-        // Get payment_intent from URL query params (added by Stripe after redirect)
         const urlParams = new URLSearchParams(window.location.search);
+
+        // Campaign donations recorded directly (no card payment)
+        if (urlParams.get('offline') === '1') {
+          setStatus('success');
+          return;
+        }
+
+        // Get payment_intent from URL query params (added by Stripe after redirect)
         const paymentIntentId = urlParams.get('payment_intent');
         const clientSecret = urlParams.get('payment_intent_client_secret');
 

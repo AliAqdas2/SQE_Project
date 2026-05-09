@@ -6,11 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { Heart, Repeat, TrendingUp, Info } from "lucide-react";
+import { TrendingUp, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -69,8 +68,6 @@ export function DonationForm({
   onSubmit,
   isLoading,
 }: DonationFormProps) {
-  const [donationType, setDonationType] = useState<"one-time" | "recurring">("one-time");
-  const [frequency, setFrequency] = useState<string>("monthly");
   const [coverFees, setCoverFees] = useState(false);
   const [customAmount, setCustomAmount] = useState<string>("");
   const [selectedAmount, setSelectedAmount] = useState<number | null>(suggestedAmounts[0]?.amount || null);
@@ -103,15 +100,13 @@ export function DonationForm({
 
   const currentAmount = selectedAmount || parseFloat(customAmount) || 0;
   
-  // Stripe fee calculation: 2.9% + $0.30
-  // When covering fees, we need to gross up the amount so that after Stripe takes their cut,
-  // the campaign receives exactly the donor's intended amount
-  const totalAmount = coverFees 
-    ? (currentAmount + 0.30) / (1 - 0.029) // Gross up: (amount + fixed_fee) / (1 - percentage_fee)
+  // Optional “cover fees” bump so the stated gift amount reaches the campaign (offline recording)
+  const totalAmount = coverFees
+    ? (currentAmount + 0.3) / (1 - 0.029)
     : currentAmount;
-  
-  const stripeFee = totalAmount * 0.029 + 0.30;
-  const netAmount = totalAmount - stripeFee;
+
+  const contributionFeeEstimate = totalAmount * 0.029 + 0.3;
+  const netAmount = totalAmount - contributionFeeEstimate;
   
   // Calculate Gift Aid amount (not added to total, just displayed)
   const giftAidAmount = giftAidOptIn && taxReliefProgram && currentAmount > 0
@@ -153,8 +148,7 @@ export function DonationForm({
   const handleSubmit = (data: DonationFormData) => {
     onSubmit({
       ...data,
-      recurring: donationType === "recurring",
-      frequency: donationType === "recurring" ? frequency : undefined,
+      recurring: false,
       coverFees,
       totalAmount,
       giftAidOptIn: taxReliefProgram ? giftAidOptIn : false,
@@ -176,64 +170,6 @@ export function DonationForm({
 
       <CardContent>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-          {/* One-time vs Recurring */}
-          <div className="space-y-3">
-            <Label>Donation Type</Label>
-            <RadioGroup 
-              value={donationType} 
-              onValueChange={(value) => setDonationType(value as "one-time" | "recurring")}
-              className="grid grid-cols-2 gap-4"
-            >
-              <div>
-                <RadioGroupItem
-                  value="one-time"
-                  id="one-time"
-                  className="peer sr-only"
-                />
-                <Label
-                  htmlFor="one-time"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-transparent p-4 hover-elevate cursor-pointer peer-data-[state=checked]:border-primary"
-                  data-testid="radio-one-time"
-                >
-                  <Heart className="mb-2 h-6 w-6" />
-                  <span className="font-medium">One-time</span>
-                </Label>
-              </div>
-              <div>
-                <RadioGroupItem
-                  value="recurring"
-                  id="recurring"
-                  className="peer sr-only"
-                />
-                <Label
-                  htmlFor="recurring"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-transparent p-4 hover-elevate cursor-pointer peer-data-[state=checked]:border-primary"
-                  data-testid="radio-recurring"
-                >
-                  <Repeat className="mb-2 h-6 w-6" />
-                  <span className="font-medium">Monthly</span>
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          {/* Frequency for recurring */}
-          {donationType === "recurring" && (
-            <div className="space-y-2">
-              <Label htmlFor="frequency">Frequency</Label>
-              <Select value={frequency} onValueChange={setFrequency}>
-                <SelectTrigger data-testid="select-frequency">
-                  <SelectValue placeholder="Select frequency" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="quarterly">Quarterly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
           {/* Donation Category */}
           {donationCategories.length > 1 && (
             <div className="space-y-2">
@@ -328,20 +264,20 @@ export function DonationForm({
               />
               <div className="flex-1">
                 <Label htmlFor="coverFees" className="cursor-pointer font-medium flex items-center gap-2">
-                  Cover processing fees
+                  Add an optional bump to your gift
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Info className="h-4 w-4 text-muted-foreground" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>By covering fees, 100% of your donation goes to the cause</p>
+                        <p>Increases your total slightly so more of your intended gift supports the campaign</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </Label>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Add {formatCurrency(stripeFee)} to cover processing fees
+                  Add about {formatCurrency(contributionFeeEstimate)} to your total when selected
                 </p>
               </div>
             </div>
@@ -354,8 +290,8 @@ export function DonationForm({
                 </div>
                 {coverFees && (
                   <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>Processing fee:</span>
-                    <span>{formatCurrency(stripeFee)}</span>
+                    <span>Additional bump:</span>
+                    <span>{formatCurrency(contributionFeeEstimate)}</span>
                   </div>
                 )}
                 <div className="flex justify-between font-semibold border-t pt-2">
@@ -519,20 +455,8 @@ export function DonationForm({
             disabled={isLoading || currentAmount <= 0}
             data-testid="button-donate-submit"
           >
-            {isLoading ? (
-              "Processing..."
-            ) : donationType === "recurring" ? (
-              `Donate ${formatCurrency(totalAmount)} ${frequency}`
-            ) : (
-              `Donate ${formatCurrency(totalAmount)}`
-            )}
+            {isLoading ? "Processing..." : `Pay now • ${formatCurrency(totalAmount)}`}
           </Button>
-
-          {donationType === "recurring" && (
-            <p className="text-xs text-center text-muted-foreground">
-              You can cancel your recurring donation at any time from your account
-            </p>
-          )}
         </form>
       </CardContent>
     </Card>

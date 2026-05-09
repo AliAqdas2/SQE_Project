@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, RefreshCw, ArrowUp, Users, Calendar, CreditCard, TrendingUp, Crown, Zap, Check } from "lucide-react";
+import { Loader2, RefreshCw, ArrowUp, Users, AlertCircle, CreditCard, TrendingUp, Crown, Zap, Check } from "lucide-react";
 import { getCurrencySymbol } from "@shared/location-constants";
 import {
   Alert,
@@ -101,8 +101,8 @@ export default function SubscriptionPage() {
 
     if (success === 'true') {
       toast({
-        title: "Subscription Successful!",
-        description: "Your subscription has been activated. All marketplace modules are now unlocked.",
+        title: "Welcome back",
+        description: "Subscription details refreshed.",
       });
       // Clear the query params from URL
       window.history.replaceState({}, '', '/dashboard/subscription');
@@ -113,8 +113,8 @@ export default function SubscriptionPage() {
 
     if (canceled === 'true') {
       toast({
-        title: "Checkout Canceled",
-        description: "Your subscription checkout was canceled. No charges were made.",
+        title: "Canceled",
+        description: "You left the subscription page before confirming.",
         variant: "default",
       });
       // Clear the query params from URL
@@ -168,19 +168,26 @@ export default function SubscriptionPage() {
     },
   });
 
-  const createCheckoutMutation = useMutation({
+  const subscribeMutation = useMutation({
     mutationFn: async (data: { planId: string; billingCycle: string; currency: string }) => {
       const response = await apiRequest("POST", `/api/org/${orgId}/subscription/create-checkout`, data);
-      return response.json();
+      return response.json() as Promise<{ success: boolean }>;
     },
-    onSuccess: (data: { sessionId: string; url: string }) => {
-      // Redirect to Stripe Checkout
-      window.location.href = data.url;
+    onSuccess: (data: { success?: boolean }) => {
+      setUpgradeDialogOpen(false);
+      if (data.success) {
+        toast({
+          title: "Subscribed",
+          description: "Your plan is updated. Marketplace modules unlock according to your tier.",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/org", orgId, "subscription"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org", orgId, "subscription", "available-plans"] });
     },
     onError: (error: Error) => {
       toast({
-        title: "Checkout Error",
-        description: error.message || "Failed to create checkout session",
+        title: "Could not update subscription",
+        description: error.message || "Something went wrong",
         variant: "destructive",
       });
     },
@@ -719,9 +726,9 @@ export default function SubscriptionPage() {
             <DialogDescription>
               {(() => {
                 const hasSubscription = !!subscription && !!plan;
-                return hasSubscription 
-                  ? 'Review your plan change details before proceeding to checkout'
-                  : 'Review your subscription details before proceeding to checkout';
+                return hasSubscription
+                  ? "Confirm to switch plans on your account."
+                  : "Confirm to activate this plan on your account.";
               })()}
             </DialogDescription>
           </DialogHeader>
@@ -772,18 +779,17 @@ export default function SubscriptionPage() {
                       if (hasSubscription) {
                         return (
                           <>
-                    <strong>Pro-ration:</strong> You'll be charged immediately and your billing cycle will start today.
-                    All marketplace modules will be unlocked instantly.
-                          </>
-                        );
-                      } else {
-                        return (
-                          <>
-                            <strong>New Subscription:</strong> You'll be charged immediately and your billing cycle will start today.
-                            All marketplace modules will be unlocked instantly upon successful payment.
+                            <strong>Plan change:</strong> Your subscription is updated immediately for this environment
+                            (no payment step). Billing period restarts from today for the selected cycle.
                           </>
                         );
                       }
+                      return (
+                        <>
+                          <strong>New subscription:</strong> Your organization is placed on this plan right away (no payment
+                          step). Modules for your tier unlock as configured in the app.
+                        </>
+                      );
                     })()}
                   </AlertDescription>
                 </Alert>
@@ -799,27 +805,27 @@ export default function SubscriptionPage() {
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (!selectedUpgradePlan) return;
-                createCheckoutMutation.mutate({
+                subscribeMutation.mutate({
                   planId: selectedUpgradePlan.id,
                   billingCycle: selectedBillingCycle,
                   currency: selectedCurrency,
                 });
               }}
-              disabled={createCheckoutMutation.isPending}
+              disabled={subscribeMutation.isPending}
               data-testid="button-proceed-checkout"
             >
-              {createCheckoutMutation.isPending ? (
+              {subscribeMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
+                  Subscribing...
                 </>
               ) : (
                 <>
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  Proceed to Checkout
+                  <Check className="mr-2 h-4 w-4" />
+                  Subscribe
                 </>
               )}
             </Button>

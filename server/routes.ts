@@ -106,7 +106,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "crypto";
 import { sendApprovalEmail, sendRejectionEmail, sendNewRegistrationNotification, sendTeamAdminInvitation } from "./email";
 import { sendCampaign } from "./emailSender";
-import { sendThankYouEmail, sendTicketConfirmationEmail } from "./resendEmail";
+import { sendThankYouEmail, sendTicketConfirmationEmail, resendEmail } from "./resendEmail";
 import QRCode from "qrcode";
 import { seedDefaultEmailTemplate } from "./seed-default-email-templates";
 import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
@@ -1103,110 +1103,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use localized pricing
       const price = billingCycle === "monthly" ? localizedPricing.monthlyPrice : localizedPricing.yearlyPrice;
       
-      // Additional validation: ensure price is valid
+      // Additional validation: ensure price is valid (display / reporting only — no payment)
       if (!price || parseFloat(price) < 0) {
-        return res.status(400).json({ 
-          error: `Invalid pricing for plan "${plan.name}" in currency ${currency}. Please contact support.` 
+        return res.status(400).json({
+          error: `Invalid pricing for plan "${plan.name}" in currency ${currency}. Please contact support.`,
         });
       }
 
-      // Create or get Stripe Customer for this organization
-      let customerId = organization.stripeCustomerId;
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: user.email,
-          name: organization.name,
-          metadata: {
-            orgId: organization.id,
-            country: organization.country,
-          },
-        });
-        customerId = customer.id;
-        // Update organization with Stripe Customer ID
-        await storage.updateOrganization(organization.id, { stripeCustomerId: customerId });
+      const now = new Date();
+      const periodEnd = new Date(now);
+      if (billingCycle === "monthly") {
+        periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+      } else {
+        periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 1);
       }
 
-      // Ensure plan has Stripe Product and Price IDs - create if needed
-      let stripeProductId = plan.stripeProductId;
-      let stripePriceId = billingCycle === "monthly" ? plan.stripeMonthlyPriceId : plan.stripeYearlyPriceId;
+      const memberCount = currentSubscription?.memberCount ?? 0;
 
-      // Create Stripe Product if it doesn't exist
-      if (!stripeProductId) {
-        const product = await stripe.products.create({
-          name: `${plan.name} Plan`,
-          description: plan.description,
-          metadata: {
-            tierCode: plan.tierCode,
-            planId: plan.id,
-          },
-        });
-        stripeProductId = product.id;
+      const subscriptionPayload = {
+        planId: plan.id,
+        billingCycle,
+        memberCount,
+        status: "active" as const,
+        stripeCustomerId: null as string | null,
+        stripeSubscriptionId: null as string | null,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        cancelAtPeriodEnd: false,
+        canceledAt: null as Date | null,
+      };
 
-        // Update plan with Stripe Product ID
-        await storage.updateSubscriptionPlan(plan.id, { stripeProductId });
-      }
-
-      // Create Stripe Price if it doesn't exist (using localized pricing)
-      if (!stripePriceId) {
-        const stripePrice = await stripe.prices.create({
-          product: stripeProductId,
-          unit_amount: Math.round(parseFloat(price) * 100), // Convert to cents
-          currency: currency.toLowerCase(),
-          recurring: {
-            interval: billingCycle === "monthly" ? "month" : "year",
-          },
-          metadata: {
-            tierCode: plan.tierCode,
-            planId: plan.id,
-            billingCycle,
-            countryCode: organization.country,
-          },
-        });
-        stripePriceId = stripePrice.id;
-
-        // Update plan with Stripe Price ID
-        const updateData = billingCycle === "monthly" 
-          ? { stripeMonthlyPriceId: stripePriceId }
-          : { stripeYearlyPriceId: stripePriceId };
-        await storage.updateSubscriptionPlan(plan.id, updateData);
-      }
-
-      // Create Stripe Checkout Session with Customer
-      const session = await stripe.checkout.sessions.create({
-        mode: "subscription",
-        payment_method_types: ["card"],
-        customer: customerId,
-        line_items: [
-          {
-            price: stripePriceId,
-            quantity: 1,
-          },
-        ],
-        success_url: `${req.headers.origin}/dashboard/subscription?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${req.headers.origin}/dashboard/subscription?canceled=true`,
-        subscription_data: {
-          metadata: {
-            orgId: req.params.orgId,
-            planId: plan.id,
-            tierCode: plan.tierCode,
-            billingCycle,
-            previousPlanId: currentSubscription?.planId || null,
-            isNewSubscription: currentSubscription ? 'false' : 'true',
-          },
-        },
-        metadata: {
+      let saved;
+      if (currentSubscription) {
+        saved = await storage.updateOrganizationSubscription(req.params.orgId, subscriptionPayload);
+      } else {
+        saved = await storage.createOrganizationSubscription({
           orgId: req.params.orgId,
-          planId: plan.id,
-          tierCode: plan.tierCode,
-          billingCycle,
-          previousPlanId: currentSubscription?.planId || null,
-          isNewSubscription: currentSubscription ? 'false' : 'true',
-        },
-      });
+          ...subscriptionPayload,
+        });
+      }
+
+      console.log("[subscription] Recorded locally (no payment):", req.params.orgId, plan.id, billingCycle, currency);
 
       res.json({
-        sessionId: session.id,
-        url: session.url,
+        success: true,
+        subscription: saved,
       });
     } catch (error) {
       console.error("Error creating checkout session:", error);
@@ -1254,15 +1195,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Subscription is already canceled" });
       }
 
-      // Cancel Stripe subscription (at period end)
       if (currentSubscription.stripeSubscriptionId) {
-        await stripe.subscriptions.update(currentSubscription.stripeSubscriptionId, {
-          cancel_at_period_end: true,
-        });
+        try {
+          await stripe.subscriptions.update(currentSubscription.stripeSubscriptionId, {
+            cancel_at_period_end: true,
+          });
+        } catch (stripeErr) {
+          console.warn("Stripe cancel skipped or failed (subscription may be local-only):", stripeErr);
+        }
       }
 
-      // Update database to reflect cancellation
-      await storage.updateOrganizationSubscription(currentSubscription.id, {
+      await storage.updateOrganizationSubscription(req.params.orgId, {
         cancelAtPeriodEnd: true,
         canceledAt: new Date(),
       });
@@ -2980,129 +2923,82 @@ Return ONLY a valid JSON object with this exact structure:
     }
   });
 
-  // Process Donation (no auth required for public donations)
+  // Process Donation (no auth required for public donations) — records payment without Stripe
   app.post("/api/campaigns/:campaignId/donate", async (req, res) => {
     try {
-      const { amount, donorName, donorEmail, message, recurring, frequency, coverFees, totalAmount, category, giftAidOptIn, donorAddress, donorTown, donorState, donorPostcode } = req.body;
+      const {
+        amount,
+        donorName,
+        donorEmail,
+        message,
+        recurring,
+        frequency,
+        coverFees,
+        totalAmount,
+        category,
+        giftAidOptIn,
+        donorAddress,
+        donorTown,
+        donorState,
+        donorPostcode,
+      } = req.body;
 
-      if (!amount || !donorName || !donorEmail || !totalAmount) {
+      if (!amount || !donorName || !donorEmail || totalAmount === undefined || totalAmount === null) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
-      // Get campaign
+      if (recurring) {
+        return res.status(400).json({
+          error: "Recurring donations are not available. Please make a one-time donation.",
+        });
+      }
+
       const campaign = await storage.getCampaign(req.params.campaignId);
       if (!campaign) {
         return res.status(404).json({ error: "Campaign not found" });
       }
 
-      // Only accept donations for active campaigns
       if (campaign.status !== "active") {
         return res.status(400).json({ error: "This campaign is not accepting donations" });
       }
 
-      // Calculate fee amount
       const donationAmount = parseFloat(amount);
       const total = parseFloat(totalAmount);
-      const feeAmount = total - donationAmount;
-
-      // Create or get donor
-      let donor = await storage.getDonorByEmail(donorEmail, campaign.orgId);
-      if (!donor) {
-        const [firstName, ...lastNameParts] = donorName.split(" ");
-        donor = await storage.createDonor({
-          orgId: campaign.orgId,
-          firstName,
-          lastName: lastNameParts.join(" ") || "",
-          email: donorEmail,
-        });
+      if (Number.isNaN(donationAmount) || donationAmount <= 0 || Number.isNaN(total) || total < donationAmount) {
+        return res.status(400).json({ error: "Invalid amount" });
       }
 
-      if (recurring) {
-        // Create Stripe subscription for recurring donations
-        const customer = await stripe.customers.create({
-          email: donorEmail,
-          name: donorName,
-          metadata: {
-            orgId: campaign.orgId,
-            campaignId: campaign.id,
-            donorId: donor.id,
-          },
-        });
+      const feeAmount = Math.max(0, total - donationAmount);
+      const giftAidBool = giftAidOptIn === true || giftAidOptIn === "true";
 
-        const price = await stripe.prices.create({
-          unit_amount: Math.round(total * 100), // Convert to cents
-          currency: (campaign.currency || "USD").toLowerCase(),
-          recurring: {
-            interval: frequency === "yearly" ? "year" : frequency === "quarterly" ? "month" : "month",
-            interval_count: frequency === "quarterly" ? 3 : 1,
-          },
-          product_data: {
-            name: `${campaign.title} - Recurring Donation`,
-          },
-        });
+      const stripePaymentId = `recorded-${randomUUID()}`;
 
-        const subscription = await stripe.subscriptions.create({
-          customer: customer.id,
-          items: [{ price: price.id }],
-          payment_behavior: "default_incomplete",
-          payment_settings: {
-            payment_method_types: ["card"],
-            save_default_payment_method: "on_subscription",
-          },
-          expand: ["latest_invoice.payment_intent"],
-          metadata: {
-            orgId: campaign.orgId,
-            campaignId: campaign.id,
-            donorId: donor.id,
-            category: category || "general",
-            coverFees: coverFees ? "true" : "false",
-            feeAmount: feeAmount.toFixed(2),
-            giftAidOptIn: giftAidOptIn ? "true" : "false",
-            donorAddress: donorAddress || "",
-            donorCity: donorCity || "",
-            donorPostcode: donorPostcode || "",
-            donorCountry: donorCountry || "",
-          },
-        });
+      const result = await processDonationWithEmail({
+        orgId: campaign.orgId,
+        campaignId: campaign.id,
+        stripePaymentId,
+        donorEmail,
+        donorName,
+        amount: donationAmount,
+        currency: campaign.currency || "USD",
+        category: category || "general",
+        message: message || "",
+        coverFees: !!(coverFees === true || coverFees === "true"),
+        feeAmount,
+        recurring: false,
+        frequency: frequency || undefined,
+        giftAidOptIn: giftAidBool,
+        donorAddress,
+        donorTown,
+        donorState,
+        donorPostcode,
+      });
 
-        const invoice: any = subscription.latest_invoice;
-        const paymentIntent: any = invoice?.payment_intent;
-
-        res.json({
-          subscriptionId: subscription.id,
-          clientSecret: paymentIntent?.client_secret,
-        });
-      } else {
-        // Create Stripe payment intent for one-time donations
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(total * 100), // Convert to cents
-          currency: (campaign.currency || "USD").toLowerCase(),
-          metadata: {
-            orgId: campaign.orgId,
-            campaignId: campaign.id,
-            donorId: donor.id,
-            donorEmail,
-            donorName,
-            message: message || "",
-            category: category || "general",
-            coverFees: coverFees ? "true" : "false",
-            feeAmount: feeAmount.toFixed(2),
-            giftAidOptIn: giftAidOptIn ? "true" : "false",
-            donorAddress: donorAddress || "",
-            donorTown: donorTown || "",
-            donorState: donorState || "",
-            donorPostcode: donorPostcode || "",
-          },
-          receipt_email: donorEmail,
-        });
-
-        res.json({
-          clientSecret: paymentIntent.client_secret,
-        });
-      }
-    } catch (error: any) {
+      res.json({ success: true, donation: result.donation, duplicate: result.duplicate });
+    } catch (error: unknown) {
+      const messageErr = error instanceof Error ? error.message : "Unknown error";
       console.error("Donation processing error:", error);
-      res.status(500).json({ error: "Failed to process donation", details: error.message });
+      res.status(500).json({ error: "Failed to process donation", details: messageErr });
     }
   });
 
@@ -3166,7 +3062,9 @@ Return ONLY a valid JSON object with this exact structure:
     donationType?: string;
     giftAidOptIn?: boolean;
     donorAddress?: string;
+    donorTown?: string;
     donorCity?: string;
+    donorState?: string;
     donorPostcode?: string;
     donorCountry?: string;
   }): Promise<any> {
@@ -3190,10 +3088,15 @@ Return ONLY a valid JSON object with this exact structure:
       donationType = "online",
       giftAidOptIn = false,
       donorAddress,
-      donorTown,
-      donorState,
+      donorTown: donorTownParam,
+      donorCity,
+      donorState: donorStateParam,
       donorPostcode,
+      donorCountry,
     } = params;
+
+    const donorTown = donorTownParam ?? donorCity;
+    const donorState = donorStateParam ?? donorCountry;
 
     // Check for duplicate donation (idempotency) - only if we have a real Stripe payment ID
     if (stripePaymentId) {

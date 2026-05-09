@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute } from "wouter";
 import { DonationForm } from "@/components/donation-form";
-import { StripePaymentForm } from "@/components/stripe-payment-form";
 import { CampaignProgress } from "@/components/campaign-progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,9 +35,7 @@ interface CampaignWithOrg extends Campaign {
 export default function CampaignPublicPage() {
   const [, params] = useRoute("/c/:slug/:campaignId");
   const { toast } = useToast();
-  const [paymentStep, setPaymentStep] = useState<"form" | "payment" | "success">("form");
-  const [clientSecret, setClientSecret] = useState<string>("");
-  const [donationAmount, setDonationAmount] = useState<number>(0);
+  const [paymentStep, setPaymentStep] = useState<"form" | "success">("form");
 
   const { data: campaign, isLoading } = useQuery<CampaignWithOrg>({
     queryKey: ["/api/campaigns/public", params?.campaignId],
@@ -55,11 +52,16 @@ export default function CampaignPublicPage() {
       const res = await apiRequest("POST", `/api/campaigns/${params?.campaignId}/donate`, data);
       return await res.json();
     },
-    onSuccess: (data) => {
-      // Store client secret and amount for payment form
-      if (data.clientSecret) {
-        setClientSecret(data.clientSecret);
-        setPaymentStep("payment");
+    onSuccess: (data: { success?: boolean; duplicate?: boolean }) => {
+      if (data.success) {
+        setPaymentStep("success");
+        toast({
+          title: data.duplicate ? "Already recorded" : "Thank you!",
+          description: data.duplicate
+            ? "Your donation was already saved."
+            : "Your donation has been recorded.",
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/campaigns/public", params?.campaignId] });
       }
     },
     onError: (error: Error) => {
@@ -93,26 +95,8 @@ export default function CampaignPublicPage() {
     );
   }
 
-  const handleDonation = (donationData: any) => {
-    setDonationAmount(donationData.totalAmount);
+  const handleDonation = (donationData: unknown) => {
     donateMutation.mutate(donationData);
-  };
-
-  const handlePaymentSuccess = () => {
-    setPaymentStep("success");
-    toast({
-      title: "Thank you for your donation!",
-      description: "Your support makes a real difference.",
-    });
-    queryClient.invalidateQueries({ queryKey: ["/api/campaigns/public", params?.campaignId] });
-  };
-
-  const handlePaymentError = (error: string) => {
-    toast({
-      title: "Payment failed",
-      description: error,
-      variant: "destructive",
-    });
   };
 
   const handleShare = () => {
@@ -411,17 +395,6 @@ export default function CampaignPublicPage() {
                 />
               )}
               
-              {paymentStep === "payment" && clientSecret && (
-                <StripePaymentForm
-                  clientSecret={clientSecret}
-                  amount={donationAmount}
-                  currency={campaign.currency || "USD"}
-                  campaignId={campaign.id}
-                  onSuccess={handlePaymentSuccess}
-                  onError={handlePaymentError}
-                />
-              )}
-
               {paymentStep === "success" && (
                 <Card>
                   <CardContent className="pt-6 text-center space-y-4">
