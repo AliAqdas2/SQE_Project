@@ -1,0 +1,217 @@
+Here’s a **plain-English spec** you can paste into Replit to implement Plegit’s **freemium + modular + country-level pricing** with correct billing when modules are enabled/disabled.
+
+---
+
+# Plegit Subscription & Billing – Implementation Spec
+
+## 1) What we’re building
+
+* Pricing is managed **per country** by **Eco-Admin** in **GBP, USD, and AED** (one or more currencies per country).
+* A charity picks its country at signup; the **country’s prices and currency** are adopted for that org.
+* **Free Base Plan** (≤100 members) includes **Donor CRM, Contacts, Landing Page**.
+* **Paid CRM tiers** are size-based: **Core, Growth, Scale, Enterprise, Enterprise+**.
+* **Modules** are optional and **priced individually** (e.g., £10–£25). Turning a module on/off updates the subscription items and the **next invoice**. If proration is ON, we also charge/credit the remainder of the current period.
+
+**Always included:** unlimited team users.
+**Tax:** handled by Stripe Tax using org country.
+
+---
+
+## 2) Tiers & modules (logical model)
+
+**Base (free):**
+
+* Up to 100 members
+* Includes: Donor CRM, Contacts/People, Landing Page
+
+**Paid CRM tiers (member caps):**
+
+* Core: up to 500
+* Growth: up to 1,000
+* Scale: up to 3,000
+* Enterprise: up to 5,000
+* Enterprise+: 5,000+ (custom)
+
+> The **price per tier** comes from **Eco-Admin country settings** (in local currency). Same for **each module**.
+
+**Modules (examples):**
+
+* Events, Livestream, Activities, Volunteer Management, Beneficiary Management, Sermon Library, Peer-to-Peer Fundraising
+* Free community modules (always £/$/AED 0): Prayer Wall, Muslim Prayer Timetable
+
+---
+
+## 3) Country-level pricing (Eco-Admin)
+
+Eco-Admin sets, per **country**:
+
+* **Currency** to bill in (GBP, USD, AED)
+* **Monthly & annual price** for each CRM tier
+* **Monthly & annual price** for each **module**
+* **VAT/tax** settings (we still pass to Stripe Tax)
+* Effective date (optional), rounding rules (optional)
+
+**Storage: `country_pricing`**
+
+* country_code (e.g., GB, AE, US)
+* currency (GBP|USD|AED)
+* tier_code (free|core|growth|scale|enterprise|enterprise_plus)
+* tier_monthly_price, tier_annual_price
+* module_key, module_monthly_price, module_annual_price
+* vat_rate (optional; Stripe Tax preferred)
+* effective_from, updated_at
+
+**Rule:** If a country has **no custom pricing**, use **global defaults** (UK GBP template).
+
+---
+
+## 4) Signup flow
+
+1. Charity enters **country** and org details.
+2. System fetches **country_pricing** for that country:
+
+   * Sets **currency**, **tier prices**, **module prices**.
+3. If **member_estimate ≤100** → offer **Free Base** (or allow choosing a paid tier).
+4. Create Stripe **Customer** with country and tax location.
+5. If paid tier selected → create Stripe **Subscription** with:
+
+   * 1 subscription item = **CRM tier** price (monthly or annual)
+   * 0-priced items for free modules (optional)
+6. If Free Base → record “free” status (no Stripe sub yet). As soon as they pick a paid tier or a paid module, we create a Stripe subscription.
+
+---
+
+## 5) Member count & auto-tiering
+
+* We store **is_active_member** on Contacts.
+* **Daily job** counts active members per org.
+* If **over the current tier cap** for **3 consecutive days**:
+
+  * Flag **pending_auto_upgrade** to the **next tier**
+  * Auto-schedule the upgrade at **next renewal** (or immediate on admin click)
+  * Email the billing owner with the date & new price
+* If **below a lower tier cap** for **30 consecutive days**:
+
+  * Show “Downgrade available at renewal” prompt
+
+**Free → Core trigger:** if active members become **101+**, schedule upgrade to **Core** at renewal (or immediate on click).
+
+---
+
+## 6) Module enable/disable (Marketplace)
+
+* Marketplace shows all modules with current **country prices**.
+* When **enabling** a paid module:
+
+  * Add a **subscription item** for that module’s **country price** in the org currency.
+  * If proration is ON: Stripe prorates for the remainder of the current period and invoices now.
+  * Ensure the **next invoice** reflects the full recurring amount.
+* When **disabling** a paid module:
+
+  * Remove its subscription item.
+  * If proration is ON: Stripe issues a prorated credit for the remaining time.
+  * **Next invoice** excludes that module.
+
+**Free modules** (Prayer Wall, Prayer Timetable) are toggled but **never billed**.
+
+---
+
+## 7) Billing & proration rules
+
+* **Billing cycle:** monthly or annual.
+* **Proration default:** **ON** for immediate financial accuracy.
+  (We can turn it OFF globally if desired; next invoice will still be correct.)
+* All changes (tier upgrades/downgrades or module toggles) update Stripe **subscription items** immediately; next cycle reflects the new totals.
+* Annual plans: upgrades prorate forward; downgrades apply credit at next renewal.
+
+---
+
+## 8) Stripe setup
+
+**Products/Prices strategy (simple & reliable):**
+
+* One Stripe **Product** per **CRM tier** and per **Module**.
+* For each product, create **Prices** per **currency** (GBP, USD, AED).
+  Example: `crm_core_monthly_gbp`, `crm_core_monthly_usd`, `crm_core_monthly_aed`, etc.
+* If a **country** needs a different amount from the standard currency price, create a **country-specific Price** (e.g., `crm_core_monthly_aed_ae`).
+* Store **price_id** chosen per org in our DB for clarity.
+
+**Stripe Tax:** enabled; pass country and address for tax calculation.
+
+---
+
+## 9) Persistence (minimum tables)
+
+* `organisations`: id, name, country_code, currency, billing_email, stripe_customer_id
+* `subscriptions`: org_id, status, billing_cycle, current_period_start, current_period_end, tier_code, stripe_subscription_id
+* `subscription_items`: org_id, type (‘crm_tier’ | ‘module’), code (e.g., ‘core’ or ‘events’), stripe_price_id, is_active
+* `country_pricing`: (as above)
+* `contacts`: id, org_id, is_active_member, status
+* `audit_logs`: org_id, event, data_json, created_at
+
+---
+
+## 10) Webhooks to handle
+
+* `customer.subscription.created/updated/deleted`
+* `invoice.payment_succeeded/failed`
+* `checkout.session.completed`
+* (Optional) `customer.tax_location.updated`
+
+**On webhook:**
+
+* Sync subscription status & period dates.
+* Sync subscription items (active modules & tier).
+* Record changes to `audit_logs`.
+* If payment fails → dunning (email day 1, 3, 7; pause after day 10).
+
+---
+
+## 11) API endpoints (internal)
+
+* `POST /pricing/country/set` (Eco-Admin)
+  Body: country_code, currency, tier prices, module prices
+  Action: upsert `country_pricing`, create/sync Stripe Price IDs if needed.
+* `POST /checkout`
+  Body: org_id, chosen_tier, billing_cycle, trial_days?
+  Action: create or update Stripe subscription; store price_ids.
+* `POST /marketplace/module/toggle`
+  Body: org_id, module_key, enabled (bool)
+  Action: add/remove Stripe subscription item; honor proration setting.
+* `POST /tiers/upgrade`
+  Body: org_id, target_tier, immediate?
+  Action: update Stripe subscription item; proration if immediate.
+* `GET /billing/summary`
+  Returns: currency, current tier, active modules, next invoice estimate, renewal date.
+
+---
+
+## 12) UX rules
+
+* **Price display**: always show **local currency** picked by Eco-Admin for that country.
+* **Upgrade banner** at 90% of member cap: “You’re at 450/500. Core renews on 12 Jan; you’ll move to Growth if you stay above 500.”
+* **Marketplace** shows current **per-module price** in local currency and the **new total** before confirming changes.
+* **Invoice preview**: show **next invoice total** whenever a module or tier changes.
+
+---
+
+## 13) Edge cases
+
+* Seasonal spikes: the **3-day rule** prevents instant unwanted upgrades.
+* Country price change by Eco-Admin: apply **on next renewal** for existing subs; new subs use new price immediately.
+* Free plan + paid modules: allowed. The Stripe subscription then contains **only module items** (no CRM tier item).
+* Currency lock: an org’s **currency is fixed** by its country at signup. If country changes, migrate subscription carefully (cancel & recreate).
+
+---
+
+## 14) Acceptance checklist
+
+* ✅ New org in AE is billed in **AED** using **AE country prices**.
+* ✅ Toggling a paid module **immediately** updates Stripe items; **next invoice** includes it; proration applied if ON.
+* ✅ Auto-upgrade triggers after 3 days above cap; schedules change at renewal (or immediate on click).
+* ✅ Eco-Admin can change **country prices**; new subs use new prices; existing move at renewal.
+* ✅ Free plan has **no Stripe sub** until a paid tier or a paid module is selected.
+
+---
+
+If you want, I’ll add a short **JSON seed** example for `country_pricing` (GB/US/AE) and a **module toggle flow diagram**.

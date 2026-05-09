@@ -1,0 +1,136 @@
+Here’s your updated Replit specification including the new rule that pricing is managed at the Eco Admin level per country — so subscription rates can differ across markets while keeping logic centralised.
+
+⸻
+
+Plegit Pricing and Billing Spec (Updated for Country-Level Management)
+
+Goal
+
+Implement a flat monthly or annual subscription that includes all modules.
+Pricing scales only by member count, and rates are managed by Eco Admins at the country level.
+When a church exceeds its member threshold, it auto-upgrades to the next tier.
+All marketplace modules are free to enable.
+Every plan includes unlimited team users.
+
+⸻
+
+Tier Structure (Base Template in GBP)
+
+Tier Name	Member Threshold	Base Monthly (£)	Base Annual (£)
+Starter	Up to 100 members	£39	£390
+Core	Up to 500 members	£79	£790
+Growth	Up to 1,000 members	£129	£1,290
+Scale	1,001–3,000 members	£199	£1,990
+Enterprise	3,001+ members	£299+ (Custom)	Custom
+
+These values are the default UK pricing.
+Each country can override these figures at the Eco Admin level.
+
+⸻
+
+🌍 Country-Level Pricing Control (Eco Admin)
+
+Overview
+	•	Pricing tiers (Starter, Core, Growth, Scale, Enterprise) can be customised per country by an Eco Admin.
+	•	Eco Admins can set:
+	•	Local currency (e.g. GBP, USD, ZAR, NGN, AED)
+	•	Monthly and annual price per tier
+	•	VAT or local tax percentage
+	•	Rounding rules (e.g. round to nearest 9 for local pricing)
+	•	All churches in that country inherit these settings automatically.
+
+Example
+
+| Country | Currency | Starter | Core | Growth | Scale | Enterprise | VAT |
+|–––––|———–|–––––|––––|———|––––|———––|
+| UK | GBP | £39 | £79 | £129 | £199 | £299 | 20% |
+| South Africa | ZAR | R699 | R1,199 | R1,999 | R2,999 | Custom | 15% |
+| Nigeria | NGN | ₦12,000 | ₦22,000 | ₦35,000 | ₦52,000 | Custom | 7.5% |
+| USA | USD | $39 | $79 | $129 | $199 | Custom | 0% (handled by Stripe Tax) |
+
+Functionality
+	•	Eco Admins can edit tier pricing and currency via an admin panel.
+	•	When saved, all new subscriptions in that country use the updated pricing.
+	•	Existing subscriptions:
+	•	Keep their old pricing until renewal.
+	•	At renewal, automatically move to the new country pricing if it changed.
+	•	If no local pricing is set, default to UK/GBP rates.
+
+Data model additions
+
+Add a country_pricing table:
+
+country_pricing (
+  id,
+  country_code (e.g., "GB", "ZA"),
+  currency,
+  tier_code,
+  monthly_price,
+  annual_price,
+  vat_rate,
+  rounding_rule,
+  created_by_admin_id,
+  created_at,
+  updated_at
+)
+
+Link organisations.country_code to this table when calculating billing.
+
+⸻
+
+Billing Logic Changes
+	•	When generating a checkout session or invoice, the system determines price using:
+	1.	Organisation’s country code (org.country_code)
+	2.	Country-specific pricing from country_pricing
+	3.	If none exists, fallback to default tier pricing in GBP
+	•	VAT or local tax rate applied from that record
+	•	Stripe Products/Prices are dynamically created or synced for each country where Plegit operates
+
+⸻
+
+Auto-Upgrade Rules (unchanged)
+	•	Monitors active member count
+	•	If over threshold for 3 consecutive days, queue auto-upgrade at renewal
+	•	If under threshold for 30 days, suggest downgrade
+	•	Auto-upgrade always uses pricing based on org.country_code
+
+⸻
+
+Admin Controls (Updated)
+	•	Eco Admins can:
+	•	Create or edit country_pricing entries
+	•	Set or update local VAT rates
+	•	Toggle currencies active for that ecosystem
+	•	Set a default tier for new churches
+	•	Preview what churches in each country will pay
+	•	Super Admins (Plegit HQ) can:
+	•	Override or lock Eco Admin pricing in specific regions
+	•	Push default tier templates globally
+
+⸻
+
+Example Logic Flow
+
+Step 1:
+A church in South Africa signs up → country = ZA.
+System checks country_pricing → finds currency=ZAR and tier pricing.
+Starter tier = R699/month → create Stripe checkout with ZAR pricing.
+
+Step 2:
+If the church reaches 550 members, auto-upgrade triggers next renewal → Core Tier at R1,199/month.
+
+Step 3:
+Eco Admin later adjusts South Africa Core Tier to R1,299 → next billing cycle for all Core users uses new rate automatically.
+
+⸻
+
+Summary of Benefits
+	•	Global consistency: Tier names, rules, and structure identical worldwide.
+	•	Local flexibility: Pricing adjusts to local economies and tax laws.
+	•	Eco Admin control: Country leads manage financial alignment without developer intervention.
+	•	Automation: Churches upgrade automatically by size, not by manual admin.
+	•	Transparency: Every church sees its tier and local price clearly in-app.
+
+⸻
+
+Would you like me to extend this spec with the admin interface layout and permissions (so Replit knows how Eco Admins interact with the pricing UI)?

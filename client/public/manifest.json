@@ -1,0 +1,32 @@
+{
+  "name": "Plegit - Faith-Based Fundraising Platform",
+  "short_name": "Plegit",
+  "description": "PWA-first fundraising platform for faith-based organizations",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#00BCD4",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["finance", "social", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Give Now",
+      "short_name": "Give",
+      "description": "Make a donation",
+      "url": "/give",
+      "icons": [{ "src": "/favicon.png", "sizes": "192x192" }]
+    }
+  ]
+}

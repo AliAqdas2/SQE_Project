@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plegit 2.0 - IIS Reverse Proxy Configuration
+  =============================================
+  RECOMMENDED APPROACH for modern deployments
+  
+  This configuration uses IIS as a reverse proxy to a separately-running 
+  Node.js process. This is more stable than iisnode and easier to debug.
+  
+  Prerequisites:
+  1. Install URL Rewrite Module
+  2. Install Application Request Routing (ARR)
+  3. Enable ARR proxy: IIS Manager > Server > ARR > Enable proxy
+  4. Run Node.js as a Windows Service (using PM2 or node-windows)
+  
+  Node.js Service Setup (using PM2):
+  1. npm install -g pm2
+  2. npm install -g pm2-windows-startup
+  3. pm2 start dist/index.js --name plegit
+  4. pm2 save
+  5. pm2-startup install
+-->
+<configuration>
+  
+  <system.webServer>
+    
+    <!-- Enable reverse proxy -->
+    <proxy enabled="true" preserveHostHeader="true" />
+    
+    <!-- URL Rewrite Rules -->
+    <rewrite>
+      <rules>
+        
+        <!-- Proxy all requests to Node.js running on localhost:5000 -->
+        <rule name="ReverseProxyToNode" stopProcessing="true">
+          <match url="(.*)" />
+          <conditions>
+            <!-- Exclude static files that IIS should serve directly -->
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+          </conditions>
+          <action type="Rewrite" url="http://localhost:5000/{R:1}" />
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_FORWARDED_PROTO" value="{REQUEST_SCHEME}" />
+            <set name="HTTP_X_REAL_IP" value="{REMOTE_ADDR}" />
+          </serverVariables>
+        </rule>
+        
+        <!-- WebSocket support for real-time features -->
+        <rule name="WebSocketProxy" stopProcessing="true">
+          <match url="(.*)" />
+          <conditions>
+            <add input="{HTTP_UPGRADE}" pattern="websocket" ignoreCase="true" />
+          </conditions>
+          <action type="Rewrite" url="http://localhost:5000/{R:1}" />
+        </rule>
+        
+      </rules>
+      
+      <!-- Outbound rules for URL rewriting in responses -->
+      <outboundRules>
+        <rule name="RewriteLocationHeader" preCondition="IsRedirect">
+          <match serverVariable="RESPONSE_LOCATION" pattern="http://localhost:5000/(.*)" />
+          <action type="Rewrite" value="{SCHEME}://{HTTP_HOST}/{R:1}" />
+        </rule>
+        <preConditions>
+          <preCondition name="IsRedirect">
+            <add input="{RESPONSE_STATUS}" pattern="^30[1237]$" />
+          </preCondition>
+        </preConditions>
+      </outboundRules>
+      
+    </rewrite>
+    
+    <!-- Security: Hide sensitive directories -->
+    <security>
+      <requestFiltering>
+        <hiddenSegments>
+          <add segment="node_modules" />
+          <add segment=".env" />
+          <add segment=".git" />
+          <add segment="server" />
+          <add segment="client" />
+          <add segment="shared" />
+        </hiddenSegments>
+        <requestLimits maxAllowedContentLength="52428800" />
+      </requestFiltering>
+    </security>
+    
+    <!-- HTTP Response Headers -->
+    <httpProtocol>
+      <customHeaders>
+        <remove name="X-Powered-By" />
+        <add name="X-Content-Type-Options" value="nosniff" />
+        <add name="X-Frame-Options" value="SAMEORIGIN" />
+        <add name="X-XSS-Protection" value="1; mode=block" />
+      </customHeaders>
+    </httpProtocol>
+    
+    <!-- Compression -->
+    <urlCompression doStaticCompression="true" doDynamicCompression="true" />
+    
+    <!-- Custom error handling -->
+    <httpErrors existingResponse="PassThrough" />
+    
+  </system.webServer>
+  
+</configuration>
