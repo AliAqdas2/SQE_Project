@@ -1,0 +1,277 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║               PLEGIT BACKEND UNIT TEST REPORT                             ║
+║                         May 9, 2026                                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════
+TEST RESULTS SUMMARY
+═══════════════════════════════════════════════════════════════════════════
+
+Test Suite: Backend Business Logic Modules
+Test Directory:  server/test/
+Framework:  Vitest 4.1.5 (Node.js environment)
+
+───────────────────────────────────────────────────────────────────────────
+OVERALL RESULTS
+───────────────────────────────────────────────────────────────────────────
+
+Total Tests:        90
+✅ Passed:          90
+❌ Failed:          0
+⏭️  Skipped:        0
+Success Rate:       100%
+
+Execution Time:     369ms (tests only)
+Total Duration:     2.84 seconds
+
+───────────────────────────────────────────────────────────────────────────
+TEST DISTRIBUTION BY MODULE
+───────────────────────────────────────────────────────────────────────────
+
+Module                          Tests    Status
+─────────────────────────────────────────────────────
+Analytics (Comprehensive)         20     ✅ 100% Pass
+MemberCount Service (Comp.)       11     ✅ 100% Pass
+Object ACL (Comprehensive)        16     ✅ 100% Pass
+Analytics (Legacy)                 5     ✅ 100% Pass
+MemberCount Service (Legacy)       6     ✅ 100% Pass
+Object ACL (Legacy)                8     ✅ 100% Pass
+Email Sender                       5     ✅ 100% Pass
+Stripe Configuration              11     ✅ 100% Pass
+Email Renderer                     8     ✅ 100% Pass
+─────────────────────────────────────────────────────
+TOTAL                             90     ✅ 100% Pass
+
+───────────────────────────────────────────────────────────────────────────
+NEW COMPREHENSIVE TEST SUITES (47 tests added)
+───────────────────────────────────────────────────────────────────────────
+
+1. ANALYTICS MODULE (20 tests) - analytics.comprehensive.test.ts
+   
+   ✅ Date Range Resolution (7 tests)
+      • Default 30-day range
+      • Parse from/to dates
+      • Current date as 'to'
+      • Different date formats
+      • Same day ranges
+      • Date difference calculations
+   
+   ✅ Date Range Calculations (3 tests)
+      • Previous period for 7-day range
+      • Previous period for 30-day range
+      • Leap year calculations
+   
+   ✅ Analytics Data Calculations (6 tests)
+      • Percentage change (positive/negative)
+      • Zero previous amount handling
+      • Average donation calculations
+      • Campaign completion rate
+      • Volunteer hours average
+   
+   ✅ Number Casting & Validation (4 tests)
+      • String to number casting
+      • Null/undefined handling
+      • Array sum operations
+
+2. MEMBERCOUNT SERVICE (11 tests) - memberCount.comprehensive.test.ts
+   
+   ✅ Member Count Logic (2 tests)
+      • Zero members handling
+      • User counting per org
+   
+   ✅ Tier Upgrade Logic (4 tests)
+      • No upgrade within limits
+      • Auto-upgrade when exceeded
+      • No upgrade without plans
+      • No upgrade without subscription
+   
+   ✅ Tier Recommendation (2 tests)
+      • Recommend based on count
+      • Default to enterprise
+   
+   ✅ Tier Usage Percentage (4 tests)
+      • Correct percentage calculation
+      • Enterprise tier (no limits)
+      • Cap at 100%
+      • No subscription handling
+
+3. OBJECT ACL MODULE (16 tests) - objectAcl.comprehensive.test.ts
+   
+   ✅ setObjectAclPolicy (4 tests)
+      • Set policy for valid object
+      • Error for non-existent file
+      • Create metadata directory
+      • JSON serialization
+   
+   ✅ getObjectAclPolicy (4 tests)
+      • Return existing policy
+      • Null for missing file
+      • Null for invalid JSON
+      • Parse public visibility
+   
+   ✅ canAccessObject - Public (3 tests)
+      • Read without user
+      • Deny write without user
+      • Read with any user
+   
+   ✅ canAccessObject - Private (3 tests)
+      • Deny without user
+      • Owner full access
+      • Deny non-owner
+   
+   ✅ canAccessObject - No Policy (2 tests)
+      • Deny when no ACL exists
+      • Deny all access without policy
+
+───────────────────────────────────────────────────────────────────────────
+FILES CREATED
+───────────────────────────────────────────────────────────────────────────
+
+New Test Files:
+  ✓ server/test/analytics.comprehensive.test.ts       (20 tests)
+  ✓ server/test/memberCount.comprehensive.test.ts     (11 tests)
+  ✓ server/test/objectAcl.comprehensive.test.ts       (16 tests)
+
+Configuration:
+  ✓ vitest.config.server.ts                          (Backend test config)
+  ✓ package.json                                      (Test scripts updated)
+
+───────────────────────────────────────────────────────────────────────────
+TEST COMMANDS
+───────────────────────────────────────────────────────────────────────────
+
+Run backend tests:
+  $ npm run test:server
+
+Run backend tests in watch mode:
+  $ npm run test:server:watch
+
+Run backend tests with coverage:
+  $ npm run test:server:coverage
+
+Run ALL tests (frontend + backend):
+  $ npm run test:all
+
+───────────────────────────────────────────────────────────────────────────
+BUSINESS LOGIC TESTED
+───────────────────────────────────────────────────────────────────────────
+
+1. Analytics Module
+   ✓ Date range resolution and normalization
+   ✓ Percentage change calculations (growth/decline)
+   ✓ Average calculations (donations, volunteer hours)
+   ✓ Campaign completion rates
+   ✓ Safe null/undefined handling from database
+   ✓ String to number casting for decimal fields
+
+2. MemberCount Service
+   ✓ Active member counting per organization
+   ✓ Automatic tier upgrades when limits exceeded
+   ✓ Tier recommendations based on member count
+   ✓ Usage percentage tracking (0-100%)
+   ✓ Email notifications on tier changes
+   ✓ Enterprise tier unlimited members
+
+3. Object ACL (Access Control)
+   ✓ File-based ACL policy storage
+   ✓ Public vs. private object visibility
+   ✓ Owner-based access control
+   ✓ READ vs. WRITE permission distinction
+   ✓ Fail-secure defaults (no policy = no access)
+   ✓ Metadata file management
+
+───────────────────────────────────────────────────────────────────────────
+PERFORMANCE METRICS
+───────────────────────────────────────────────────────────────────────────
+
+Transform Time:     2.57s (TypeScript compilation)
+Setup Time:         685ms (Test environment)
+Import Time:        7.06s (Module loading)
+Test Execution:     369ms (Actual test runs)
+Environment:        3ms (Node.js setup)
+─────────────────────────────────────────────────────────────────────────
+Total Duration:     2.84s
+
+Average per test:   4.1ms (90 tests / 369ms)
+
+───────────────────────────────────────────────────────────────────────────
+MOCKING STRATEGY
+───────────────────────────────────────────────────────────────────────────
+
+Environment: Node.js
+Mocked:
+  ✓ Database (Drizzle ORM) - Full mock implementation
+  ✓ Storage layer - Mock storage service
+  ✓ File system - Mock fs.promises for ACL tests
+  ✓ Email service - Mock email sending
+  ✓ Stripe API - Mock configuration
+
+───────────────────────────────────────────────────────────────────────────
+TEST QUALITY
+───────────────────────────────────────────────────────────────────────────
+
+✅ Well-Isolated:     Each test is independent
+✅ Fast Execution:    369ms for 90 tests
+✅ Comprehensive:     Edge cases covered (null, zero, empty)
+✅ Business-Focused:  Real-world scenarios validated
+✅ Maintainable:      Clear naming and organization
+
+───────────────────────────────────────────────────────────────────────────
+COVERAGE (run with --coverage)
+───────────────────────────────────────────────────────────────────────────
+
+Coverage reports saved to: ./coverage-server/
+
+Formats:
+  • Text (console output)
+  • JSON (coverage-server/coverage-final.json)
+  • HTML (coverage-server/index.html)
+
+Open HTML report:
+  $ open coverage-server/index.html
+
+───────────────────────────────────────────────────────────────────────────
+COMBINED TEST SUITE SUMMARY
+───────────────────────────────────────────────────────────────────────────
+
+Component           Tests    Status
+─────────────────────────────────────────
+Frontend (UI)         5      ✅ 100% Pass
+Backend (API)        90      ✅ 100% Pass
+─────────────────────────────────────────
+TOTAL                95      ✅ 100% Pass
+
+───────────────────────────────────────────────────────────────────────────
+NEXT STEPS
+───────────────────────────────────────────────────────────────────────────
+
+Immediate:
+  ✅ All tests passing - ready for CI/CD integration
+
+Future Enhancements:
+  • Add integration tests with real database
+  • Add API endpoint tests (routes.ts)
+  • Add Stripe webhook tests
+  • Add email scheduler tests
+  • Performance/load testing
+  • Security testing (SQL injection, etc.)
+
+───────────────────────────────────────────────────────────────────────────
+CONCLUSION
+───────────────────────────────────────────────────────────────────────────
+
+STATUS: ✅ ALL 90 BACKEND TESTS PASSING (100%)
+
+The backend business logic has been comprehensively tested covering:
+  ✓ Analytics calculations and date handling
+  ✓ Member count tracking and tier management
+  ✓ Access control and file permissions
+  ✓ Edge cases and error scenarios
+  ✓ Business rule enforcement
+
+Test infrastructure is production-ready and provides solid foundation
+for continuous integration and deployment.
+
+For detailed report, see: BACKEND_TEST_REPORT.md
+
+═══════════════════════════════════════════════════════════════════════════

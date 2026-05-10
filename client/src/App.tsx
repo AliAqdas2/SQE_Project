@@ -97,7 +97,8 @@ import MediaLibraryToolPage from "@/pages/tools/media-library";
 import AIChatbotToolPage from "@/pages/tools/ai-chatbot";
 import NotFound from "@/pages/not-found";
 
-function Router() {
+/** Application route tree; use with wouter’s `<Router hook={…}>` in tests (e.g. `memoryLocation`). */
+export function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={LandingPage} />
@@ -610,7 +611,7 @@ export default function App() {
         <PWAInstallProvider>
           <TooltipProvider>
             <Toaster />
-            <Router />
+            <AppRouter />
             <PWAInstallBanner />
           </TooltipProvider>
         </PWAInstallProvider>

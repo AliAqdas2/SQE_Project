@@ -1,0 +1,129 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    PLEGIT UI UNIT TEST REPORT                             ║
+║                         May 9, 2026                                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════
+TEST RESULTS SUMMARY
+═══════════════════════════════════════════════════════════════════════════
+
+Test Suite: Main Application UI (AppRouter + Providers)
+Test File:  client/src/App.test.tsx
+Framework:  Vitest 4.1.5 + React Testing Library
+
+───────────────────────────────────────────────────────────────────────────
+OVERALL RESULTS
+───────────────────────────────────────────────────────────────────────────
+
+Total Tests:        5
+✅ Passed:          5
+❌ Failed:          0
+⏭️  Skipped:        0
+Success Rate:       100%
+
+Execution Time:     1.52 seconds
+Total Duration:     18.64 seconds
+
+───────────────────────────────────────────────────────────────────────────
+TEST CASES
+───────────────────────────────────────────────────────────────────────────
+
+1. ✅ Landing Page Hero Content                              (689ms)
+   Route: /
+   Validates: Hero title "Your All-in-One Platform for Charity & Faith"
+
+2. ✅ Landing Page Call-to-Action                            (217ms)
+   Route: /
+   Validates: "Start Free Today" button is present and accessible
+
+3. ✅ Organization Login Screen                              (67ms)
+   Route: /login
+   Validates: Login page title "Sign in to Plegit"
+
+4. ✅ Eco Admin Login Screen                                 (25ms)
+   Route: /eco-admin/login
+   Validates: Admin portal title "Eco Admin Portal"
+
+5. ✅ 404 Not Found Page                                     (514ms)
+   Route: /unknown-route
+   Validates: 404 error page renders correctly
+
+───────────────────────────────────────────────────────────────────────────
+FILES CREATED/MODIFIED
+───────────────────────────────────────────────────────────────────────────
+
+New Files:
+  ✓ client/src/App.test.tsx           - 5 unit tests
+  ✓ client/src/test/setup.ts          - Test environment setup
+  ✓ client/src/test/render-app-at.tsx - Test helper utility
+
+Modified Files:
+  ✓ client/src/App.tsx                - Exported AppRouter for testing
+  ✓ vite.config.ts                    - Vitest configuration
+  ✓ tsconfig.json                     - JSX mode updated
+  ✓ package.json                      - Test scripts added
+
+───────────────────────────────────────────────────────────────────────────
+TEST COMMANDS
+───────────────────────────────────────────────────────────────────────────
+
+Run all tests:
+  $ npm test
+
+Run tests in watch mode (development):
+  $ npm run test:watch
+
+Run tests with coverage report:
+  $ npm run test:coverage
+
+───────────────────────────────────────────────────────────────────────────
+ROUTES TESTED
+───────────────────────────────────────────────────────────────────────────
+
+Route                   Component           Test Status
+─────────────────────────────────────────────────────────
+/                       LandingPage         ✅ PASSING
+/login                  LoginPage           ✅ PASSING
+/eco-admin/login        EcoAdminLoginPage   ✅ PASSING
+/*                      NotFound            ✅ PASSING
+
+───────────────────────────────────────────────────────────────────────────
+MOCKS & SETUP
+───────────────────────────────────────────────────────────────────────────
+
+Environment: jsdom
+Mocked APIs:
+  ✓ localStorage (getItem, setItem, removeItem, clear)
+  ✓ window.matchMedia (for responsive/theme detection)
+
+Test Utilities:
+  ✓ renderAppAt(path) - Renders app with full provider stack
+  ✓ In-memory routing with wouter memoryLocation
+  ✓ React Query with disabled retries
+
+───────────────────────────────────────────────────────────────────────────
+NEXT STEPS
+───────────────────────────────────────────────────────────────────────────
+
+Immediate:
+  ✅ All tests passing - ready for CI/CD
+
+Future Enhancements:
+  • Add tests for authenticated routes (/dashboard/*)
+  • Test form validation (login, registration)
+  • Add component-level tests
+  • Integrate coverage reporting in CI
+  • Add E2E tests with Playwright/Cypress
+
+───────────────────────────────────────────────────────────────────────────
+CONCLUSION
+───────────────────────────────────────────────────────────────────────────
+
+STATUS: ✅ ALL TESTS PASSING
+
+The main UI module has been successfully tested with 100% pass rate.
+Test infrastructure is production-ready.
+
+For detailed report, see: TEST_REPORT.md
+
+═══════════════════════════════════════════════════════════════════════════
